@@ -34,7 +34,7 @@ npm install
 cp .env.example .env
 ```
 
-3. Add your Gmail SMTP values to `.env`:
+3. For local or fallback email OTP, add SMTP values to `.env`:
 
 ```env
 SMTP_USER=apratimnandy99@gmail.com
@@ -42,7 +42,14 @@ SMTP_PASS=your-app-password
 SMTP_FROM=apratimnandy99@gmail.com
 ```
 
-4. Add your Groq key if you want AI companion and AI food scanning:
+4. For hosted deployments like Render, prefer Resend email API:
+
+```env
+RESEND_API_KEY=your-resend-api-key
+RESEND_FROM=OKRA <your-verified-sender@yourdomain.com>
+```
+
+5. Add your Groq key if you want AI companion and AI food scanning:
 
 ```env
 GROQ_API_KEY=your-groq-api-key
@@ -50,7 +57,7 @@ GROQ_MODEL=openai/gpt-oss-20b
 GROQ_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 ```
 
-5. Start the app:
+6. Start the app:
 
 ```bash
 npm run dev
@@ -61,6 +68,7 @@ npm run dev
 ## Notes
 
 - `npm run dev` starts both the React client and the OTP email server.
+- If `RESEND_API_KEY` is present, email OTP uses Resend first. SMTP stays available as a local fallback.
 - The app works without Firebase and without Spoonacular.
 - If Groq is not configured or unavailable, AI companion falls back locally and food scan falls back to Spoonacular/mock/manual entry.
 - If SMTP is missing or unavailable, the app falls back to demo OTP `123456`.

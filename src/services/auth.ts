@@ -6,6 +6,7 @@ const OTP_KEY = 'discipline-ai-tracker-pending-otp';
 const normalizeIdentifier = (identifier: string) => identifier.trim().toLowerCase();
 const canUseDemoFallback = () =>
   ['localhost', '127.0.0.1'].includes(window.location.hostname) || window.location.hostname.endsWith('.local');
+const isEmailOtpProvider = (provider?: UserSession['provider']) => provider === 'email-otp' || provider === 'email-smtp';
 
 const toStableUserId = (identifier: string) =>
   `user-${normalizeIdentifier(identifier).replace(/[^a-z0-9]/g, '').slice(0, 24) || randomId()}`;
@@ -27,18 +28,29 @@ export const sendOtp = async (identifier: string) => {
     });
 
     if (response.ok) {
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            provider?: 'resend' | 'smtp';
+            message?: string;
+          }
+        | null;
+
       window.localStorage.setItem(
         OTP_KEY,
         JSON.stringify({
           identifier: normalizedIdentifier,
-          provider: 'email-smtp',
+          provider: 'email-otp',
         }),
       );
 
       return {
         code: '',
-        provider: 'email-smtp' as const,
-        message: 'OTP sent to your email through SMTP.',
+        provider: 'email-otp' as const,
+        message:
+          payload?.message ||
+          (payload?.provider === 'resend'
+            ? 'OTP sent to your email through Resend.'
+            : 'OTP sent to your email.'),
       };
     }
 
@@ -88,7 +100,7 @@ export const verifyOtp = async (identifier: string, code: string): Promise<UserS
     throw new Error('No OTP request found for this identifier.');
   }
 
-  if (pending.provider === 'email-smtp') {
+  if (isEmailOtpProvider(pending.provider)) {
     const response = await fetch('/api/auth/verify-otp', {
       method: 'POST',
       headers: {
@@ -111,7 +123,7 @@ export const verifyOtp = async (identifier: string, code: string): Promise<UserS
       userId: data.userId ?? toStableUserId(normalizedIdentifier),
       identifier: normalizedIdentifier,
       verifiedAt: new Date().toISOString(),
-      provider: 'email-smtp',
+      provider: 'email-otp',
     };
   }
 

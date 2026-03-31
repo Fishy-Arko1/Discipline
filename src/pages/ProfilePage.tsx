@@ -199,7 +199,12 @@ export const ProfilePage = () => {
         <CardShell>
           <p className="text-sm uppercase tracking-[0.24em] text-black">Session</p>
           <p className="muted-text mt-2 text-sm">
-            Auth mode: {session.provider === 'email-smtp' ? 'Email OTP via SMTP' : session.provider === 'firebase-auth' ? 'Firebase-ready simulation' : 'Simulated OTP'}
+            Auth mode:{' '}
+            {session.provider === 'email-otp' || session.provider === 'email-smtp'
+              ? 'Email OTP'
+              : session.provider === 'firebase-auth'
+                ? 'Firebase-ready simulation'
+                : 'Simulated OTP'}
           </p>
           <button
             type="button"

@@ -19,7 +19,11 @@ const port = Number(process.env.PORT || process.env.OTP_SERVER_PORT || 8787);
 const otpStore = new Map();
 const refreshEnv = () => dotenv.config({ path: envPath, override: true });
 const isGroqConfigured = () => Boolean(process.env.GROQ_API_KEY);
+const isResendConfigured = () => Boolean(process.env.RESEND_API_KEY);
 const isSmtpConfigured = () => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+const getEmailProvider = () => (isResendConfigured() ? 'resend' : isSmtpConfigured() ? 'smtp' : 'none');
+const getEmailSender = () =>
+  process.env.RESEND_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || 'OKRA <onboarding@resend.dev>';
 const getGroqModel = (kind = 'general') =>
   process.env[kind === 'vision' ? 'GROQ_VISION_MODEL' : 'GROQ_MODEL'] ||
   process.env.GROQ_MODEL ||
@@ -36,15 +40,116 @@ app.use(express.json({ limit: '12mb' }));
 const createTransporter = () =>
   isSmtpConfigured()
     ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    })
+        host: process.env.SMTP_HOST || 'smtp.gmail.com',
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      })
     : null;
+
+const buildOtpEmailText = (code) => `OKRA login code: ${code}. It expires in 10 minutes.`;
+
+const buildOtpEmailHtml = (code) => `
+  <div style="margin:0; padding:32px 16px; background:#070707; background-image:
+    radial-gradient(circle at top left, rgba(249,115,22,0.18), transparent 24%),
+    radial-gradient(circle at top right, rgba(59,130,246,0.12), transparent 18%),
+    linear-gradient(180deg, #050505 0%, #0a0a0a 42%, #130d07 100%);
+    font-family: 'Segoe UI', Arial, sans-serif; color:#f5f5f5;">
+    <div style="max-width:640px; margin:0 auto;">
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:24px;">
+        <div style="height:52px; width:52px; border-radius:18px; display:inline-flex; align-items:center; justify-content:center; color:#ffffff; font-size:22px; font-weight:700; letter-spacing:0.18em; background:linear-gradient(135deg, #f97316 0%, #fbbf24 48%, #3b82f6 100%); box-shadow:0 16px 32px rgba(249,115,22,0.28);">O</div>
+        <div>
+          <div style="font-size:28px; line-height:1; font-weight:700; letter-spacing:0.32em; color:#fff7ed;">OKRA</div>
+          <div style="margin-top:6px; font-size:11px; letter-spacing:0.22em; text-transform:uppercase; color:rgba(255,237,213,0.72);">Discipline AI Tracker</div>
+        </div>
+      </div>
+
+      <div style="border:1px solid rgba(251,146,60,0.22); border-radius:32px; padding:28px; background:rgba(11,11,11,0.86); box-shadow:0 24px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(251,146,60,0.12);">
+        <div style="font-size:12px; letter-spacing:0.24em; text-transform:uppercase; color:rgba(255,237,213,0.78);">Secure Login</div>
+        <h2 style="margin:14px 0 10px; font-size:40px; line-height:1.05; font-weight:700; color:#ffffff;">Your OTP is ready.</h2>
+        <p style="margin:0; font-size:16px; line-height:1.7; color:#d4d4d8;">
+          Use the verification code below to sign in to OKRA and continue your discipline streak.
+        </p>
+
+        <div style="margin:28px 0 22px; border-radius:26px; padding:22px 24px; background:linear-gradient(135deg, rgba(249,115,22,0.16), rgba(59,130,246,0.12)); border:1px solid rgba(251,146,60,0.18);">
+          <div style="font-size:12px; letter-spacing:0.22em; text-transform:uppercase; color:rgba(255,237,213,0.78);">One-Time Password</div>
+          <div style="margin-top:14px; font-size:44px; font-weight:800; letter-spacing:0.42em; color:#ffffff;">${code}</div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:18px;">
+          <div style="border-radius:999px; padding:10px 14px; background:rgba(249,115,22,0.12); color:#fed7aa; font-size:13px;">Expires in 10 minutes</div>
+          <div style="border-radius:999px; padding:10px 14px; background:rgba(59,130,246,0.12); color:#bfdbfe; font-size:13px;">Ignore if this was not you</div>
+        </div>
+      </div>
+
+      <p style="margin:16px 8px 0; font-size:12px; line-height:1.6; color:rgba(255,255,255,0.5);">
+        This code is for your OKRA account access. Never share it with anyone.
+      </p>
+    </div>
+  </div>
+`;
+
+const sendOtpWithSmtp = async ({ identifier, code, transporter }) =>
+  transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: identifier,
+    subject: 'Your OKRA OTP Code',
+    text: buildOtpEmailText(code),
+    html: buildOtpEmailHtml(code),
+  });
+
+const sendOtpWithResend = async ({ identifier, code }) => {
+  const resendResponse = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: getEmailSender(),
+      to: [identifier],
+      subject: 'Your OKRA OTP Code',
+      text: buildOtpEmailText(code),
+      html: buildOtpEmailHtml(code),
+    }),
+  });
+
+  const payload = await resendResponse.json().catch(() => null);
+
+  if (!resendResponse.ok) {
+    const detail =
+      payload?.message ||
+      payload?.error?.message ||
+      payload?.name ||
+      `Resend email request failed with status ${resendResponse.status}.`;
+    const error = new Error(detail);
+    error.code = 'RESEND_API_ERROR';
+    throw error;
+  }
+
+  return payload;
+};
+
+const getEmailErrorDetail = (error, provider) => {
+  const errorCode = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+
+  if (provider === 'resend') {
+    return error instanceof Error ? error.message : 'Failed to send OTP email through Resend.';
+  }
+
+  if (errorCode === 'EAUTH') {
+    return 'SMTP authentication failed. Verify your Gmail App Password, 2-Step Verification, and SMTP sender settings.';
+  }
+
+  if (errorCode === 'ETIMEDOUT' || errorCode === 'ESOCKET' || errorCode === 'ECONNECTION') {
+    return 'SMTP connection failed. Use a cloud-friendly email API like Resend or verify your SMTP provider allows this host.';
+  }
+
+  return 'Failed to send OTP email from the SMTP provider.';
+};
 
 const buildOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 
@@ -52,9 +157,11 @@ app.get('/api/health', (_request, response) => {
   refreshEnv();
   response.json({
     ok: true,
+    resendConfigured: isResendConfigured(),
     smtpConfigured: isSmtpConfigured(),
+    emailProvider: getEmailProvider(),
     groqConfigured: isGroqConfigured(),
-    sender: process.env.SMTP_FROM || process.env.SMTP_USER || null,
+    sender: getEmailProvider() === 'none' ? null : getEmailSender(),
   });
 });
 
@@ -208,14 +315,15 @@ const buildCompanionRequestBody = (model, messages, maxCompletionTokens = 320) =
 app.post('/api/auth/send-otp', async (request, response) => {
   refreshEnv();
   const identifier = String(request.body?.identifier || '').trim().toLowerCase();
-  const transporter = createTransporter();
+  const emailProvider = getEmailProvider();
+  const transporter = emailProvider === 'smtp' ? createTransporter() : null;
 
   if (!identifier || !identifier.includes('@')) {
     return response.status(400).json({ message: 'A valid email address is required.' });
   }
 
-  if (!isSmtpConfigured() || !transporter) {
-    return response.status(503).json({ message: 'SMTP is not configured.' });
+  if (emailProvider === 'none') {
+    return response.status(503).json({ message: 'No email OTP provider is configured.' });
   }
 
   const code = buildOtp();
@@ -227,66 +335,28 @@ app.post('/api/auth/send-otp', async (request, response) => {
   });
 
   try {
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: identifier,
-      subject: 'Your OKRA OTP Code',
-      text: `OKRA login code: ${code}. It expires in 10 minutes.`,
-      html: `
-        <div style="margin:0; padding:32px 16px; background:#070707; background-image:
-          radial-gradient(circle at top left, rgba(249,115,22,0.18), transparent 24%),
-          radial-gradient(circle at top right, rgba(59,130,246,0.12), transparent 18%),
-          linear-gradient(180deg, #050505 0%, #0a0a0a 42%, #130d07 100%);
-          font-family: 'Segoe UI', Arial, sans-serif; color:#f5f5f5;">
-          <div style="max-width:640px; margin:0 auto;">
-            <div style="display:flex; align-items:center; gap:14px; margin-bottom:24px;">
-              <div style="height:52px; width:52px; border-radius:18px; display:inline-flex; align-items:center; justify-content:center; color:#ffffff; font-size:22px; font-weight:700; letter-spacing:0.18em; background:linear-gradient(135deg, #f97316 0%, #fbbf24 48%, #3b82f6 100%); box-shadow:0 16px 32px rgba(249,115,22,0.28);">O</div>
-              <div>
-                <div style="font-size:28px; line-height:1; font-weight:700; letter-spacing:0.32em; color:#fff7ed;">OKRA</div>
-                <div style="margin-top:6px; font-size:11px; letter-spacing:0.22em; text-transform:uppercase; color:rgba(255,237,213,0.72);">Discipline AI Tracker</div>
-              </div>
-            </div>
+    if (emailProvider === 'resend') {
+      await sendOtpWithResend({ identifier, code });
+    } else if (transporter) {
+      await sendOtpWithSmtp({ identifier, code, transporter });
+    }
 
-            <div style="border:1px solid rgba(251,146,60,0.22); border-radius:32px; padding:28px; background:rgba(11,11,11,0.86); box-shadow:0 24px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(251,146,60,0.12);">
-              <div style="font-size:12px; letter-spacing:0.24em; text-transform:uppercase; color:rgba(255,237,213,0.78);">Secure Login</div>
-              <h2 style="margin:14px 0 10px; font-size:40px; line-height:1.05; font-weight:700; color:#ffffff;">Your OTP is ready.</h2>
-              <p style="margin:0; font-size:16px; line-height:1.7; color:#d4d4d8;">
-                Use the verification code below to sign in to OKRA and continue your discipline streak.
-              </p>
-
-              <div style="margin:28px 0 22px; border-radius:26px; padding:22px 24px; background:linear-gradient(135deg, rgba(249,115,22,0.16), rgba(59,130,246,0.12)); border:1px solid rgba(251,146,60,0.18);">
-                <div style="font-size:12px; letter-spacing:0.22em; text-transform:uppercase; color:rgba(255,237,213,0.78);">One-Time Password</div>
-                <div style="margin-top:14px; font-size:44px; font-weight:800; letter-spacing:0.42em; color:#ffffff;">${code}</div>
-              </div>
-
-              <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:18px;">
-                <div style="border-radius:999px; padding:10px 14px; background:rgba(249,115,22,0.12); color:#fed7aa; font-size:13px;">Expires in 10 minutes</div>
-                <div style="border-radius:999px; padding:10px 14px; background:rgba(59,130,246,0.12); color:#bfdbfe; font-size:13px;">Ignore if this was not you</div>
-              </div>
-            </div>
-
-            <p style="margin:16px 8px 0; font-size:12px; line-height:1.6; color:rgba(255,255,255,0.5);">
-              This code is for your OKRA account access. Never share it with anyone.
-            </p>
-          </div>
-        </div>
-      `,
+    return response.json({
+      sent: true,
+      provider: emailProvider,
+      message: emailProvider === 'resend' ? 'OTP sent to your email through Resend.' : 'OTP sent to your email.',
     });
-
-    return response.json({ sent: true });
   } catch (error) {
     console.error('Failed to send OTP email', error);
     otpStore.delete(identifier);
     const errorCode = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
-    const isAuthFailure = errorCode === 'EAUTH';
-    const detail = isAuthFailure
-      ? 'SMTP authentication failed. Verify your Gmail App Password, 2-Step Verification, and SMTP sender settings.'
-      : 'Failed to send OTP email from the SMTP provider.';
+    const detail = getEmailErrorDetail(error, emailProvider);
 
     return response.status(500).json({
       message: 'Failed to send OTP email.',
       detail,
       code: errorCode || undefined,
+      provider: emailProvider,
     });
   }
 });

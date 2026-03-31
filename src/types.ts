@@ -38,7 +38,7 @@ export interface UserSession {
   userId: string;
   identifier: string;
   verifiedAt: string;
-  provider: 'simulated-otp' | 'firebase-auth' | 'email-smtp';
+  provider: 'simulated-otp' | 'firebase-auth' | 'email-smtp' | 'email-otp';
 }
 
 export interface DailyLog {
