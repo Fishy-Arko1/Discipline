@@ -19,6 +19,7 @@ const port = Number(process.env.PORT || process.env.OTP_SERVER_PORT || 8787);
 const otpStore = new Map();
 const refreshEnv = () => dotenv.config({ path: envPath, override: true });
 const isGroqConfigured = () => Boolean(process.env.GROQ_API_KEY);
+const isSmtpConfigured = () => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
 const getGroqModel = (kind = 'general') =>
   process.env[kind === 'vision' ? 'GROQ_VISION_MODEL' : 'GROQ_MODEL'] ||
   process.env.GROQ_MODEL ||
@@ -32,10 +33,9 @@ app.use(
 );
 app.use(express.json({ limit: '12mb' }));
 
-const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
-
-const transporter = smtpConfigured
-  ? nodemailer.createTransport({
+const createTransporter = () =>
+  isSmtpConfigured()
+    ? nodemailer.createTransport({
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
       port: Number(process.env.SMTP_PORT || 587),
       secure: String(process.env.SMTP_SECURE || 'false') === 'true',
@@ -44,7 +44,7 @@ const transporter = smtpConfigured
         pass: process.env.SMTP_PASS,
       },
     })
-  : null;
+    : null;
 
 const buildOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
 
@@ -52,7 +52,7 @@ app.get('/api/health', (_request, response) => {
   refreshEnv();
   response.json({
     ok: true,
-    smtpConfigured,
+    smtpConfigured: isSmtpConfigured(),
     groqConfigured: isGroqConfigured(),
     sender: process.env.SMTP_FROM || process.env.SMTP_USER || null,
   });
@@ -206,13 +206,15 @@ const buildCompanionRequestBody = (model, messages, maxCompletionTokens = 320) =
 };
 
 app.post('/api/auth/send-otp', async (request, response) => {
+  refreshEnv();
   const identifier = String(request.body?.identifier || '').trim().toLowerCase();
+  const transporter = createTransporter();
 
   if (!identifier || !identifier.includes('@')) {
     return response.status(400).json({ message: 'A valid email address is required.' });
   }
 
-  if (!smtpConfigured || !transporter) {
+  if (!isSmtpConfigured() || !transporter) {
     return response.status(503).json({ message: 'SMTP is not configured.' });
   }
 
@@ -275,7 +277,17 @@ app.post('/api/auth/send-otp', async (request, response) => {
   } catch (error) {
     console.error('Failed to send OTP email', error);
     otpStore.delete(identifier);
-    return response.status(500).json({ message: 'Failed to send OTP email.' });
+    const errorCode = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+    const isAuthFailure = errorCode === 'EAUTH';
+    const detail = isAuthFailure
+      ? 'SMTP authentication failed. Verify your Gmail App Password, 2-Step Verification, and SMTP sender settings.'
+      : 'Failed to send OTP email from the SMTP provider.';
+
+    return response.status(500).json({
+      message: 'Failed to send OTP email.',
+      detail,
+      code: errorCode || undefined,
+    });
   }
 });
 

@@ -4,6 +4,8 @@ import { isFirebaseConfigured } from './firebase';
 
 const OTP_KEY = 'discipline-ai-tracker-pending-otp';
 const normalizeIdentifier = (identifier: string) => identifier.trim().toLowerCase();
+const canUseDemoFallback = () =>
+  ['localhost', '127.0.0.1'].includes(window.location.hostname) || window.location.hostname.endsWith('.local');
 
 const toStableUserId = (identifier: string) =>
   `user-${normalizeIdentifier(identifier).replace(/[^a-z0-9]/g, '').slice(0, 24) || randomId()}`;
@@ -39,8 +41,19 @@ export const sendOtp = async (identifier: string) => {
         message: 'OTP sent to your email through SMTP.',
       };
     }
-  } catch {
-    // Local demo fallback is intentionally preserved.
+
+    const errorPayload = (await response.json().catch(() => null)) as
+      | {
+          message?: string;
+          detail?: string;
+        }
+      | null;
+
+    throw new Error(errorPayload?.detail || errorPayload?.message || 'Unable to send OTP email.');
+  } catch (error) {
+    if (!canUseDemoFallback()) {
+      throw error;
+    }
   }
 
   const code = '123456';
