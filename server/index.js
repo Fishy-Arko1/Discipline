@@ -21,7 +21,7 @@ const refreshEnv = () => dotenv.config({ path: envPath, override: true });
 const isGroqConfigured = () => Boolean(process.env.GROQ_API_KEY);
 const isResendConfigured = () => Boolean(process.env.RESEND_API_KEY);
 const isSmtpConfigured = () => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
-const getEmailProvider = () => (isResendConfigured() ? 'resend' : isSmtpConfigured() ? 'smtp' : 'none');
+const getEmailProvider = () => (isSmtpConfigured() ? 'smtp' : isResendConfigured() ? 'resend' : 'none');
 const getEmailSender = () =>
   process.env.RESEND_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || 'OKRA <onboarding@resend.dev>';
 const getGroqModel = (kind = 'general') =>
