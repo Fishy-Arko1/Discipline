@@ -1,6 +1,7 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import fs from 'fs';
 import nodemailer from 'nodemailer';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -8,11 +9,13 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const envPath = path.resolve(__dirname, '..', '.env');
+const distPath = path.resolve(__dirname, '..', 'dist');
+const distIndexPath = path.join(distPath, 'index.html');
 
 dotenv.config({ path: envPath });
 
 const app = express();
-const port = Number(process.env.OTP_SERVER_PORT || 8787);
+const port = Number(process.env.PORT || process.env.OTP_SERVER_PORT || 8787);
 const otpStore = new Map();
 const refreshEnv = () => dotenv.config({ path: envPath, override: true });
 const isGroqConfigured = () => Boolean(process.env.GROQ_API_KEY);
@@ -515,6 +518,14 @@ app.post('/api/ai/scan-food', async (request, response) => {
   }
 });
 
+if (fs.existsSync(distIndexPath)) {
+  app.use(express.static(distPath));
+
+  app.get(/^(?!\/api).*/, (_request, response) => {
+    response.sendFile(distIndexPath);
+  });
+}
+
 app.listen(port, () => {
-  console.log(`OTP server listening on http://localhost:${port}`);
+  console.log(`OKRA server listening on http://localhost:${port}`);
 });
